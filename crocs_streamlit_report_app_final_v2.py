@@ -402,7 +402,8 @@ def style_total_visual_table(df):
         except Exception:
             return 0
 
-    formatted = df.copy()
+    # pandas 2.3+/Python 3.14 환경에서는 숫자 dtype 컬럼에 문자열 포맷값을 바로 넣으면 TypeError가 발생할 수 있어 object로 변환합니다.
+    formatted = df.copy().astype(object)
     for idx in formatted.index:
         row_type = formatted.loc[idx, "집행기간"]
         for col in formatted.columns:
