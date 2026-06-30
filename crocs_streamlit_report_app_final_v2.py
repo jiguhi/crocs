@@ -537,6 +537,73 @@ def style_daily_performance_table(df):
         ])
     )
 
+
+
+def make_stock_summary_table(base_df):
+    """전주 raw 기준 color + 상품사이즈별 재고/판매 요약표를 생성합니다.
+    컬러는 color 컬럼 그대로 유지하고, 컬러_상품명은 해당 color+사이즈 조합의 원본 광고집행 상품명을 표시합니다.
+    """
+    if base_df.empty:
+        return pd.DataFrame()
+
+    base_df = base_df.copy()
+
+    product_name_map = (
+        base_df.sort_values(["총 판매수량(1일)", "날짜"], ascending=[False, False])
+        .groupby(["color", "상품사이즈"], dropna=False)["광고집행 상품명"]
+        .first()
+        .reset_index()
+        .rename(columns={"광고집행 상품명": "컬러_상품명"})
+    )
+
+    stock_option = (
+        base_df.sort_values("날짜")
+        .groupby(["color", "상품사이즈", "광고집행 옵션ID"], dropna=False)
+        .agg({
+            "잔여수": "max",
+            "총 판매수량(1일)": "sum",
+            "총 전환매출액(1일)": "sum",
+        })
+        .reset_index()
+    )
+
+    stock_summary = (
+        stock_option.groupby(["color", "상품사이즈"], dropna=False)
+        .agg({
+            "잔여수": "sum",
+            "총 판매수량(1일)": "sum",
+            "총 전환매출액(1일)": "sum",
+            "광고집행 옵션ID": "nunique",
+        })
+        .reset_index()
+        .rename(columns={"광고집행 옵션ID": "옵션수"})
+    )
+
+    stock_summary["재고상태"] = pd.cut(
+        stock_summary["잔여수"],
+        bins=[-1, 0, 10, 30, 999999999],
+        labels=["품절", "부족", "주의", "여유"]
+    )
+
+    stock_summary = stock_summary.merge(
+        product_name_map,
+        on=["color", "상품사이즈"],
+        how="left"
+    )
+
+    status_order = {"품절": 0, "부족": 1, "주의": 2, "여유": 3}
+    stock_summary["재고상태_정렬"] = stock_summary["재고상태"].astype(str).map(status_order).fillna(99)
+
+    stock_summary = stock_summary[[
+        "color", "상품사이즈", "잔여수", "총 판매수량(1일)",
+        "총 전환매출액(1일)", "옵션수", "재고상태", "컬러_상품명", "재고상태_정렬"
+    ]].sort_values(
+        ["재고상태_정렬", "잔여수", "총 판매수량(1일)"],
+        ascending=[True, True, False]
+    ).drop(columns=["재고상태_정렬"])
+
+    return stock_summary
+
 def make_download(df, filename):
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
@@ -845,119 +912,74 @@ def render_campaign_dashboard(campaign_display_name, campaign_df):
 
     for color_name in list(top_colors):
         display_color_name = color_label(color_name, color_rep_products.get(color_name, ""))
-        st.markdown(f"###### {display_color_name}")
 
-        # 1) 컬러별 상품 사이즈별 성과 그래프
-        st.markdown("**1. 컬러별 상품 사이즈별 성과그래프**")
-        color_df = campaign_df[campaign_df["color"] == color_name].copy()
-        size_summary = aggregate(color_df, ["주차", "상품사이즈"])
+        st.divider()
+        with st.container(border=True):
+            st.markdown(f"### 🎨 {display_color_name}")
 
-        if size_summary.empty:
-            st.warning("사이즈별 성과 데이터가 없습니다.")
-        else:
-            size_order = (
-                size_summary.groupby("상품사이즈")[color_metric]
-                .sum()
-                .sort_values(ascending=False)
-                .index.tolist()
-            )
-            size_summary["상품사이즈"] = pd.Categorical(size_summary["상품사이즈"], categories=size_order, ordered=True)
-            size_summary = size_summary.sort_values("상품사이즈")
+            # 1) 컬러별 상품 사이즈별 성과 그래프
+            st.markdown("**1. 컬러별 상품 사이즈별 성과그래프**")
+            color_df = campaign_df[campaign_df["color"] == color_name].copy()
+            size_summary = aggregate(color_df, ["주차", "상품사이즈"])
 
-            fig_color_size = px.bar(
-                size_summary,
-                x="상품사이즈",
-                y=color_metric,
-                color="주차",
-                barmode="group",
-                title=f"{clean_tab_name(campaign_display_name)} / {display_color_name} 사이즈별 {METRIC_LABELS.get(color_metric, color_metric)} 비교"
-            )
-            st.plotly_chart(fig_color_size, use_container_width=True)
-
-        # 2) 해당 색상의 성과표(증감분, 증감률)
-        st.markdown("**2. 해당색상의 성과표**")
-        color_table = make_color_compare_table(campaign_df, color_name)
-        color_visual_tables.append(color_table)
-        st.dataframe(
-            style_total_visual_table(color_table.drop(columns=[c for c in ["color", "상품명"] if c in color_table.columns])),
-            use_container_width=True,
-            hide_index=True
-        )
-
-        with st.expander(f"{display_color_name} 전주 일자별 데이터 열기"):
-            color_daily_df = campaign_df[(campaign_df["color"] == color_name) & (campaign_df["주차"] == "전주")].copy()
-            color_daily_table = make_daily_performance_table(color_daily_df)
-            if color_daily_table.empty:
-                st.warning("전주 일자별 데이터가 없습니다.")
+            if size_summary.empty:
+                st.warning("사이즈별 성과 데이터가 없습니다.")
             else:
-                st.dataframe(style_daily_performance_table(color_daily_table), use_container_width=True, hide_index=True)
+                size_order = (
+                    size_summary.groupby("상품사이즈")[color_metric]
+                    .sum()
+                    .sort_values(ascending=False)
+                    .index.tolist()
+                )
+                size_summary["상품사이즈"] = pd.Categorical(size_summary["상품사이즈"], categories=size_order, ordered=True)
+                size_summary = size_summary.sort_values("상품사이즈")
 
-        # 3) 해당 색상의 사이즈별 재고표
-        st.markdown("**3. 해당색상의 사이즈별 재고표**")
-        color_curr_df = campaign_curr[campaign_curr["color"] == color_name].copy()
+                fig_color_size = px.bar(
+                    size_summary,
+                    x="상품사이즈",
+                    y=color_metric,
+                    color="주차",
+                    barmode="group",
+                    title=f"{clean_tab_name(campaign_display_name)} / {display_color_name} 사이즈별 {METRIC_LABELS.get(color_metric, color_metric)} 비교"
+                )
+                st.plotly_chart(fig_color_size, use_container_width=True)
 
-        if color_curr_df.empty:
-            st.warning("해당 색상의 전주 재고 데이터가 없습니다.")
-        else:
-            # 같은 color + 사이즈 조합의 원본 상품명을 정확히 붙이기 위해 color/상품사이즈 기준 대표 원본 상품명을 생성합니다.
-            product_name_map = (
-                color_curr_df.sort_values(["총 판매수량(1일)", "날짜"], ascending=[False, False])
-                .groupby(["color", "상품사이즈"], dropna=False)["광고집행 상품명"]
-                .first()
-                .reset_index()
-                .rename(columns={"광고집행 상품명": "컬러_상품명"})
+            # 2) 해당 색상의 성과표(증감분, 증감률)
+            st.markdown("**2. 해당색상의 성과표**")
+            color_table = make_color_compare_table(campaign_df, color_name)
+            color_visual_tables.append(color_table)
+            st.dataframe(
+                style_total_visual_table(color_table.drop(columns=[c for c in ["color", "상품명"] if c in color_table.columns])),
+                use_container_width=True,
+                hide_index=True
             )
 
-            stock_option = (
-                color_curr_df.sort_values("날짜")
-                .groupby(["color", "상품사이즈", "광고집행 옵션ID"], dropna=False)
-                .agg({
-                    "잔여수": "max",
-                    "총 판매수량(1일)": "sum",
-                    "총 전환매출액(1일)": "sum",
-                })
-                .reset_index()
-            )
+            with st.expander(f"{display_color_name} 전주 일자별 데이터 열기"):
+                color_daily_df = campaign_df[(campaign_df["color"] == color_name) & (campaign_df["주차"] == "전주")].copy()
+                color_daily_table = make_daily_performance_table(color_daily_df)
+                if color_daily_table.empty:
+                    st.warning("전주 일자별 데이터가 없습니다.")
+                else:
+                    st.dataframe(style_daily_performance_table(color_daily_table), use_container_width=True, hide_index=True)
 
-            color_stock_summary = (
-                stock_option.groupby(["color", "상품사이즈"], dropna=False)
-                .agg({
-                    "잔여수": "sum",
-                    "총 판매수량(1일)": "sum",
-                    "총 전환매출액(1일)": "sum",
-                    "광고집행 옵션ID": "nunique",
-                })
-                .reset_index()
-                .rename(columns={"광고집행 옵션ID": "옵션수"})
-            )
+            # 3) 해당 색상의 사이즈별 재고표
+            st.markdown("**3. 해당색상의 사이즈별 재고표**")
+            color_curr_df = campaign_curr[campaign_curr["color"] == color_name].copy()
+            color_stock_summary = make_stock_summary_table(color_curr_df)
 
-            color_stock_summary["재고상태"] = pd.cut(
-                color_stock_summary["잔여수"],
-                bins=[-1, 0, 10, 30, 999999999],
-                labels=["품절", "부족", "주의", "여유"]
-            )
+            if color_stock_summary.empty:
+                st.warning("해당 색상의 전주 재고 데이터가 없습니다.")
+            else:
+                color_stock_tables.append(color_stock_summary)
+                st.dataframe(color_stock_summary, use_container_width=True, hide_index=True)
 
-            color_stock_summary = color_stock_summary.merge(
-                product_name_map,
-                on=["color", "상품사이즈"],
-                how="left"
-            )
-
-            color_stock_summary = color_stock_summary[[
-                "color", "상품사이즈", "잔여수", "총 판매수량(1일)",
-                "총 전환매출액(1일)", "옵션수", "재고상태", "컬러_상품명"
-            ]].sort_values(["총 판매수량(1일)", "잔여수"], ascending=[False, True])
-
-            color_stock_tables.append(color_stock_summary)
-            st.dataframe(color_stock_summary, use_container_width=True, hide_index=True)
-
-            fig_color_stock = px.bar(
-                color_stock_summary,
-                x="상품사이즈",
-                y="잔여수",
-                title=f"{clean_tab_name(campaign_display_name)} / {display_color_name} 사이즈별 재고현황"
-            )
-            st.plotly_chart(fig_color_stock, use_container_width=True)
+                fig_color_stock = px.bar(
+                    color_stock_summary,
+                    x="상품사이즈",
+                    y="잔여수",
+                    title=f"{clean_tab_name(campaign_display_name)} / {display_color_name} 사이즈별 재고현황"
+                )
+                st.plotly_chart(fig_color_stock, use_container_width=True)
 
     if color_visual_tables:
         color_visual_all = pd.concat(color_visual_tables, ignore_index=True)
@@ -966,6 +988,16 @@ def render_campaign_dashboard(campaign_display_name, campaign_df):
     if color_stock_tables:
         color_stock_all = pd.concat(color_stock_tables, ignore_index=True)
         make_download(color_stock_all, f"{clean_tab_name(campaign_display_name)}_컬러Top_사이즈별_재고현황.xlsx")
+
+    st.divider()
+    st.markdown("#### 📦 캠페인 전체 상품 재고 리스트")
+    st.caption("전주 raw 기준으로 해당 캠페인에 포함된 전체 color/사이즈 조합의 재고를 표시합니다.")
+    campaign_all_stock = make_stock_summary_table(campaign_curr)
+    if campaign_all_stock.empty:
+        st.warning("캠페인 전체 상품 재고 데이터가 없습니다.")
+    else:
+        st.dataframe(campaign_all_stock, use_container_width=True, hide_index=True)
+        make_download(campaign_all_stock, f"{clean_tab_name(campaign_display_name)}_전체상품_재고리스트.xlsx")
 
 
 # =========================
