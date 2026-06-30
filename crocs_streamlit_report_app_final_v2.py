@@ -581,7 +581,7 @@ def make_stock_summary_table(base_df):
 
     stock_summary["재고상태"] = pd.cut(
         stock_summary["잔여수"],
-        bins=[-1, 0, 10, 30, 999999999],
+        bins=[-1, 0, 10, 100, 999999999],
         labels=["품절", "부족", "주의", "여유"]
     )
 
@@ -905,7 +905,6 @@ def render_campaign_dashboard(campaign_display_name, campaign_df):
     st.plotly_chart(fig_color, use_container_width=True)
 
     st.markdown("##### 컬러별 상세 분석")
-    st.caption("컬러 Top 목록 기준으로 ① 사이즈별 성과 그래프 ② 해당 컬러 성과표 ③ 해당 컬러 사이즈별 재고표 순서로 표시합니다.")
 
     color_visual_tables = []
     color_stock_tables = []
