@@ -89,14 +89,14 @@ def extract_size(product_name):
     for part in parts:
         if re.fullmatch(r"\d{3}", part):
             size = int(part)
-            if 100 <= size <= 330:
+            if 100 <= size <= 400:
                 return str(size)
 
     # 3) 전체 텍스트에서 220~320 범위 숫자 추출
     nums = re.findall(r"\b(\d{3})\b", text)
     for num in nums:
         size = int(num)
-        if 100 <= size <= 330:
+        if 100 <= size <= 400:
             return str(size)
 
     return "사이즈없음"
