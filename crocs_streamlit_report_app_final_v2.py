@@ -89,14 +89,14 @@ def extract_size(product_name):
     for part in parts:
         if re.fullmatch(r"\d{3}", part):
             size = int(part)
-            if 100 <= size <= 400:
+            if 180 <= size <= 330:
                 return str(size)
 
     # 3) 전체 텍스트에서 220~320 범위 숫자 추출
     nums = re.findall(r"\b(\d{3})\b", text)
     for num in nums:
         size = int(num)
-        if 100 <= size <= 400:
+        if 180 <= size <= 330:
             return str(size)
 
     return "사이즈없음"
@@ -925,6 +925,8 @@ def render_campaign_dashboard(campaign_display_name, campaign_df):
         st.warning("재고 요약 데이터가 없습니다.")
         return
 
+    # 옵션ID 단위로 먼저 묶어서 같은 옵션의 날짜별 재고 중 최대 잔여수만 사용합니다.
+    # 이때 원본 전체 상품명도 같이 보존해야, color+상품사이즈별 재고표에서 정확한 상품명을 표시할 수 있습니다.
     stock_option = (
         stock_base.sort_values("날짜")
         .groupby(["color", "상품사이즈", "광고집행 옵션ID"], dropna=False)
@@ -932,6 +934,7 @@ def render_campaign_dashboard(campaign_display_name, campaign_df):
             "잔여수": "max",
             "총 판매수량(1일)": "sum",
             "총 전환매출액(1일)": "sum",
+            "광고집행 상품명": lambda x: str(x.dropna().iloc[-1]) if len(x.dropna()) else "",
         })
         .reset_index()
     )
@@ -948,23 +951,34 @@ def render_campaign_dashboard(campaign_display_name, campaign_df):
         .rename(columns={"광고집행 옵션ID": "옵션수"})
     )
 
+    # color + 상품사이즈 조합별로 판매수량이 가장 큰 옵션의 원본 전체 상품명을 붙입니다.
+    # color만 기준으로 대표상품명을 가져오면 250 사이즈 상품명이 280/290 행에도 붙는 문제가 생깁니다.
+    stock_product_name = (
+        stock_option.sort_values(["color", "상품사이즈", "총 판매수량(1일)"], ascending=[True, True, False])
+        .drop_duplicates(["color", "상품사이즈"])[["color", "상품사이즈", "광고집행 상품명"]]
+        .rename(columns={"광고집행 상품명": "컬러_상품명"})
+    )
+
+    stock_summary = stock_summary.merge(
+        stock_product_name,
+        on=["color", "상품사이즈"],
+        how="left"
+    )
+
     stock_summary["재고상태"] = pd.cut(
         stock_summary["잔여수"],
         bins=[-1, 0, 10, 30, 999999999],
         labels=["품절", "부족", "주의", "여유"]
     )
 
-    # 컬러별 대표 원본 상품명(광고집행 상품명 전체)
-    stock_rep_products = (
-        curr_campaign_df[curr_campaign_df["color"].isin(popular_colors)]
-        .groupby("color")["광고집행 상품명"]
-        .agg(lambda x: x.mode().iat[0] if not x.mode().empty else x.iloc[0])
-        .to_dict()
-    )
-    
-    # 컬러_상품명에는 광고집행 상품명 원본 전체 사용
-    stock_summary["컬러_상품명"] = stock_summary["color"].map(stock_rep_products)
+    # 컬럼 순서: 컬러/사이즈/재고/성과/재고상태/원본 전체 상품명
+    stock_summary = stock_summary[[
+        "color", "상품사이즈", "잔여수", "총 판매수량(1일)",
+        "총 전환매출액(1일)", "옵션수", "재고상태", "컬러_상품명"
+    ]]
+
     stock_summary = stock_summary.sort_values(["총 판매수량(1일)", "잔여수"], ascending=[False, True])
+
     st.dataframe(stock_summary, use_container_width=True, hide_index=True)
     make_download(stock_summary, f"{clean_tab_name(campaign_display_name)}_인기컬러_사이즈별_재고현황.xlsx")
 
