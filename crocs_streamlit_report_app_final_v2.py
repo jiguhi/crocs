@@ -954,10 +954,18 @@ def render_campaign_dashboard(campaign_display_name, campaign_df):
         labels=["품절", "부족", "주의", "여유"]
     )
 
-    stock_rep_products = representative_product_by_color(curr_campaign_df, popular_colors, metric="총 판매수량(1일)")
-    stock_summary["컬러_상품명"] = stock_summary["color"].apply(lambda x: color_label(x, stock_rep_products.get(x, "")))
-    stock_summary = stock_summary.sort_values(["총 판매수량(1일)", "잔여수"], ascending=[False, True])
+    # 컬러별 대표 상품명(전체 상품명) 생성
+    stock_rep_products = (
+        curr_campaign_df[curr_campaign_df["color"].isin(popular_colors)]
+        .groupby("color", dropna=False)["광고집행 상품명"]
+        .agg(lambda x: x.mode().iat[0] if not x.mode().empty else x.iloc[0])
+        .to_dict()
+    )
 
+    # 컬러_상품명에는 전체 상품명만 표시
+    stock_summary["컬러_상품명"] = stock_summary["color"].map(stock_rep_products)
+    stock_summary = stock_summary.sort_values(["총 판매수량(1일)", "잔여수"], ascending=[False, True])
+    stock_summary = stock_summary.drop(columns=["color"])
     st.dataframe(stock_summary, use_container_width=True, hide_index=True)
     make_download(stock_summary, f"{clean_tab_name(campaign_display_name)}_인기컬러_사이즈별_재고현황.xlsx")
 
