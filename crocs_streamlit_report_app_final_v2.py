@@ -967,7 +967,7 @@ def render_campaign_dashboard(campaign_display_name, campaign_df):
 
     stock_summary["재고상태"] = pd.cut(
         stock_summary["잔여수"],
-        bins=[-1, 0, 10, 30, 999999999],
+        bins=[-1, 0, 10, 100, 999999999],
         labels=["품절", "부족", "주의", "여유"]
     )
 
