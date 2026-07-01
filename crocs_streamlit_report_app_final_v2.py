@@ -1065,6 +1065,7 @@ def render_campaign_dashboard(campaign_display_name, campaign_df):
 
             # 3) 해당 색상의 사이즈별 재고표
             st.markdown("**3. 해당색상의 사이즈별 재고표**")
+            color_prev_df = campaign_prev[campaign_prev["color"] == color_name].copy()
             color_curr_df = campaign_curr[campaign_curr["color"] == color_name].copy()
             color_stock_summary = make_stock_summary_table(color_prev_df, color_curr_df)
 
