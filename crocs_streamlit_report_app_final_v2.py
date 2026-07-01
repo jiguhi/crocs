@@ -610,7 +610,7 @@ def make_stock_summary_table(prev_df, curr_df):
         curr_stock_val = float(row.get("잔여수", 0))
 
         if prev_stock_val == 0 and curr_stock_val > 0:
-            return "🆕 신규입고"
+            return "🟢 재입고"
         if curr_stock_val > prev_stock_val:
             return "🟢 재입고"
         return "-"
@@ -643,7 +643,7 @@ def make_stock_summary_table(prev_df, curr_df):
     )
 
     status_order = {"품절": 0, "부족": 1, "주의": 2, "여유": 3}
-    restock_order = {"🆕 신규입고": 0, "🟢 재입고": 1, "-": 2}
+    restock_order = {"🟢 재입고": 0, "🟢 재입고": 1, "-": 2}
     stock_summary["재고상태_정렬"] = stock_summary["재고상태"].astype(str).map(status_order).fillna(99)
     stock_summary["재입고_정렬"] = stock_summary["재입고"].map(restock_order).fillna(99)
 
