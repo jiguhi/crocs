@@ -539,51 +539,102 @@ def style_daily_performance_table(df):
 
 
 
-def make_stock_summary_table(base_df):
-    """전주 raw 기준 color + 상품사이즈별 재고/판매 요약표를 생성합니다.
-    컬러는 color 컬럼 그대로 유지하고, 컬러_상품명은 해당 color+사이즈 조합의 원본 광고집행 상품명을 표시합니다.
+def make_stock_summary_table(prev_df, curr_df):
+    """전전주/전주 raw 기준 color + 상품사이즈별 재고/판매 요약표를 생성합니다.
+    - 표에는 전주 잔여수를 '잔여수'로 표시합니다.
+    - 전주 잔여수가 전전주보다 크면 '재입고' 컬럼에 표시합니다.
+    - 전전주 잔여수와 잔여수 변동은 화면 표시용 컬럼에서 제외합니다.
+    - 컬러는 color 컬럼 그대로 유지하고, 컬러_상품명은 해당 color+사이즈 조합의 원본 광고집행 상품명을 표시합니다.
     """
-    if base_df.empty:
+    prev_df = prev_df.copy() if prev_df is not None else pd.DataFrame()
+    curr_df = curr_df.copy() if curr_df is not None else pd.DataFrame()
+
+    if prev_df.empty and curr_df.empty:
         return pd.DataFrame()
 
-    base_df = base_df.copy()
+    def option_stock_summary(base_df, stock_col_name):
+        if base_df.empty:
+            return pd.DataFrame(columns=["color", "상품사이즈", stock_col_name])
 
-    product_name_map = (
-        base_df.sort_values(["총 판매수량(1일)", "날짜"], ascending=[False, False])
-        .groupby(["color", "상품사이즈"], dropna=False)["광고집행 상품명"]
-        .first()
-        .reset_index()
-        .rename(columns={"광고집행 상품명": "컬러_상품명"})
+        option_stock = (
+            base_df.sort_values("날짜")
+            .groupby(["color", "상품사이즈", "광고집행 옵션ID"], dropna=False)
+            .agg({"잔여수": "max"})
+            .reset_index()
+        )
+
+        return (
+            option_stock.groupby(["color", "상품사이즈"], dropna=False)
+            .agg({"잔여수": "sum"})
+            .reset_index()
+            .rename(columns={"잔여수": stock_col_name})
+        )
+
+    prev_stock = option_stock_summary(prev_df, "전전주잔여수_내부")
+    curr_stock = option_stock_summary(curr_df, "잔여수")
+
+    stock_summary = prev_stock.merge(
+        curr_stock,
+        on=["color", "상품사이즈"],
+        how="outer"
+    ).fillna(0)
+
+    # 전주 성과/옵션수 기준으로 판매수량, 매출, 옵션수를 붙입니다.
+    if curr_df.empty:
+        curr_metrics = pd.DataFrame(columns=[
+            "color", "상품사이즈", "총 판매수량(1일)", "총 전환매출액(1일)", "옵션수"
+        ])
+    else:
+        curr_metrics = (
+            curr_df.groupby(["color", "상품사이즈"], dropna=False)
+            .agg({
+                "총 판매수량(1일)": "sum",
+                "총 전환매출액(1일)": "sum",
+                "광고집행 옵션ID": "nunique",
+            })
+            .reset_index()
+            .rename(columns={"광고집행 옵션ID": "옵션수"})
+        )
+
+    stock_summary = stock_summary.merge(
+        curr_metrics,
+        on=["color", "상품사이즈"],
+        how="left"
     )
 
-    stock_option = (
-        base_df.sort_values("날짜")
-        .groupby(["color", "상품사이즈", "광고집행 옵션ID"], dropna=False)
-        .agg({
-            "잔여수": "max",
-            "총 판매수량(1일)": "sum",
-            "총 전환매출액(1일)": "sum",
-        })
-        .reset_index()
-    )
+    for col in ["전전주잔여수_내부", "잔여수", "총 판매수량(1일)", "총 전환매출액(1일)", "옵션수"]:
+        stock_summary[col] = pd.to_numeric(stock_summary[col], errors="coerce").fillna(0)
 
-    stock_summary = (
-        stock_option.groupby(["color", "상품사이즈"], dropna=False)
-        .agg({
-            "잔여수": "sum",
-            "총 판매수량(1일)": "sum",
-            "총 전환매출액(1일)": "sum",
-            "광고집행 옵션ID": "nunique",
-        })
-        .reset_index()
-        .rename(columns={"광고집행 옵션ID": "옵션수"})
-    )
+    def restock_label(row):
+        prev_stock_val = float(row.get("전전주잔여수_내부", 0))
+        curr_stock_val = float(row.get("잔여수", 0))
+
+        if prev_stock_val == 0 and curr_stock_val > 0:
+            return "🆕 신규입고"
+        if curr_stock_val > prev_stock_val:
+            return "🟢 재입고"
+        return "-"
+
+    stock_summary["재입고"] = stock_summary.apply(restock_label, axis=1)
 
     stock_summary["재고상태"] = pd.cut(
         stock_summary["잔여수"],
         bins=[-1, 0, 10, 100, 999999999],
         labels=["품절", "부족", "주의", "여유"]
     )
+
+    # 해당 color + 사이즈 조합에 맞는 원본 광고집행 상품명을 붙입니다.
+    product_base = pd.concat([curr_df, prev_df], ignore_index=True)
+    if product_base.empty:
+        product_name_map = pd.DataFrame(columns=["color", "상품사이즈", "컬러_상품명"])
+    else:
+        product_name_map = (
+            product_base.sort_values(["총 판매수량(1일)", "날짜"], ascending=[False, False])
+            .groupby(["color", "상품사이즈"], dropna=False)["광고집행 상품명"]
+            .first()
+            .reset_index()
+            .rename(columns={"광고집행 상품명": "컬러_상품명"})
+        )
 
     stock_summary = stock_summary.merge(
         product_name_map,
@@ -592,15 +643,18 @@ def make_stock_summary_table(base_df):
     )
 
     status_order = {"품절": 0, "부족": 1, "주의": 2, "여유": 3}
+    restock_order = {"🆕 신규입고": 0, "🟢 재입고": 1, "-": 2}
     stock_summary["재고상태_정렬"] = stock_summary["재고상태"].astype(str).map(status_order).fillna(99)
+    stock_summary["재입고_정렬"] = stock_summary["재입고"].map(restock_order).fillna(99)
 
     stock_summary = stock_summary[[
-        "color", "상품사이즈", "잔여수", "총 판매수량(1일)",
-        "총 전환매출액(1일)", "옵션수", "재고상태", "컬러_상품명", "재고상태_정렬"
+        "color", "상품사이즈", "잔여수", "재입고",
+        "총 판매수량(1일)", "총 전환매출액(1일)",
+        "옵션수", "재고상태", "컬러_상품명", "재고상태_정렬", "재입고_정렬"
     ]].sort_values(
-        ["재고상태_정렬", "잔여수", "총 판매수량(1일)"],
-        ascending=[True, True, False]
-    ).drop(columns=["재고상태_정렬"])
+        ["재고상태_정렬", "재입고_정렬", "잔여수", "총 판매수량(1일)"],
+        ascending=[True, True, True, False]
+    ).drop(columns=["재고상태_정렬", "재입고_정렬"])
 
     return stock_summary
 
@@ -1012,7 +1066,7 @@ def render_campaign_dashboard(campaign_display_name, campaign_df):
             # 3) 해당 색상의 사이즈별 재고표
             st.markdown("**3. 해당색상의 사이즈별 재고표**")
             color_curr_df = campaign_curr[campaign_curr["color"] == color_name].copy()
-            color_stock_summary = make_stock_summary_table(color_curr_df)
+            color_stock_summary = make_stock_summary_table(color_prev_df, color_curr_df)
 
             if color_stock_summary.empty:
                 st.warning("해당 색상의 전주 재고 데이터가 없습니다.")
@@ -1039,7 +1093,7 @@ def render_campaign_dashboard(campaign_display_name, campaign_df):
     st.divider()
     st.markdown("#### 📦 캠페인 전체 상품 재고 리스트")
     st.caption("전주 raw 기준으로 해당 캠페인에 포함된 전체 color/사이즈 조합의 재고를 표시합니다.")
-    campaign_all_stock = make_stock_summary_table(campaign_curr)
+    campaign_all_stock = make_stock_summary_table(campaign_prev, campaign_curr)
     if campaign_all_stock.empty:
         st.warning("캠페인 전체 상품 재고 데이터가 없습니다.")
     else:
