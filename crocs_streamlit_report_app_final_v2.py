@@ -878,8 +878,11 @@ def render_campaign_dashboard(campaign_display_name, campaign_df):
     )
 
     color_summary = aggregate(campaign_df, ["주차", "color"])
+
+    # 메인 분석 기준: 전주 데이터에서 판매/성과가 높은 컬러 Top N
+    curr_color_summary = color_summary[color_summary["주차"] == "전주"].copy()
     top_colors = (
-        color_summary.groupby("color")[color_metric]
+        curr_color_summary.groupby("color")[color_metric]
         .sum()
         .sort_values(ascending=False)
         .head(int(top_n_color))
@@ -887,10 +890,10 @@ def render_campaign_dashboard(campaign_display_name, campaign_df):
     )
 
     if len(top_colors) == 0:
-        st.warning("컬러 데이터가 없습니다.")
+        st.warning("전주 기준 컬러 데이터가 없습니다.")
         return
 
-    color_rep_products = representative_product_by_color(campaign_df, top_colors, metric="총 판매수량(1일)")
+    color_rep_products = representative_product_by_color(campaign_curr, top_colors, metric="총 판매수량(1일)")
     color_top = color_summary[color_summary["color"].isin(top_colors)].copy()
     color_top["컬러_상품명"] = color_top["color"].apply(lambda x: color_label(x, color_rep_products.get(x, "")))
 
@@ -900,11 +903,56 @@ def render_campaign_dashboard(campaign_display_name, campaign_df):
         y=color_metric,
         color="주차",
         barmode="group",
-        title=f"{clean_tab_name(campaign_display_name)} 컬러 Top {top_n_color} {METRIC_LABELS.get(color_metric, color_metric)} 비교"
+        title=f"{clean_tab_name(campaign_display_name)} 전주 기준 컬러 Top {top_n_color} {METRIC_LABELS.get(color_metric, color_metric)} 전전주 vs 전주 비교"
     )
     st.plotly_chart(fig_color, use_container_width=True)
 
+    # 참고용: 전전주 기준 컬러 Top N 비교는 접어서 확인
+    prev_color_summary = color_summary[color_summary["주차"] == "전전주"].copy()
+    prev_top_colors = (
+        prev_color_summary.groupby("color")[color_metric]
+        .sum()
+        .sort_values(ascending=False)
+        .head(int(top_n_color))
+        .index
+    )
+
+    if len(prev_top_colors) > 0:
+        with st.expander(f"참고용: 전전주 기준 컬러 Top {top_n_color} 비교 보기"):
+            prev_rep_products = representative_product_by_color(campaign_prev, prev_top_colors, metric="총 판매수량(1일)")
+            prev_color_top = color_summary[color_summary["color"].isin(prev_top_colors)].copy()
+            prev_color_top["컬러_상품명"] = prev_color_top["color"].apply(
+                lambda x: color_label(x, prev_rep_products.get(x, ""))
+            )
+
+            fig_prev_color = px.bar(
+                prev_color_top,
+                x="컬러_상품명",
+                y=color_metric,
+                color="주차",
+                barmode="group",
+                title=f"{clean_tab_name(campaign_display_name)} 전전주 기준 컬러 Top {top_n_color} {METRIC_LABELS.get(color_metric, color_metric)} 비교"
+            )
+            st.plotly_chart(fig_prev_color, use_container_width=True)
+
+            prev_color_tables = []
+            for prev_color_name in list(prev_top_colors):
+                prev_display_color_name = color_label(prev_color_name, prev_rep_products.get(prev_color_name, ""))
+                st.markdown(f"###### {prev_display_color_name}")
+                prev_color_table = make_color_compare_table(campaign_df, prev_color_name)
+                prev_color_tables.append(prev_color_table)
+                st.dataframe(
+                    style_total_visual_table(prev_color_table.drop(columns=[c for c in ["color", "상품명"] if c in prev_color_table.columns])),
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+            if prev_color_tables:
+                prev_color_visual_all = pd.concat(prev_color_tables, ignore_index=True)
+                make_download(prev_color_visual_all, f"{clean_tab_name(campaign_display_name)}_전전주기준_컬러Top비교표.xlsx")
+
     st.markdown("##### 컬러별 상세 분석")
+    st.caption(f"아래 상세 분석은 전주 데이터 기준 Top {top_n_color} 컬러를 전전주와 비교합니다.")
 
     color_visual_tables = []
     color_stock_tables = []
