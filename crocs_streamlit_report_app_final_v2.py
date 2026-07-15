@@ -658,6 +658,107 @@ def make_stock_summary_table(prev_df, curr_df):
 
     return stock_summary
 
+
+def make_curr_color_performance_table(color_summary, top_colors, color_rep_products):
+    """전주 기준 Top 컬러별 주요 성과지표 표를 생성합니다."""
+    curr_table = color_summary[
+        (color_summary["주차"] == "전주") &
+        (color_summary["color"].isin(list(top_colors)))
+    ].copy()
+
+    if curr_table.empty:
+        return pd.DataFrame()
+
+    curr_table["컬러"] = curr_table["color"].apply(
+        lambda x: color_label(x, color_rep_products.get(x, ""))
+    )
+
+    curr_table = curr_table[[
+        "컬러",
+        "노출수",
+        "클릭수",
+        "광고비",
+        "총 주문수(1일)",
+        "총 판매수량(1일)",
+        "총 전환매출액(1일)",
+        "CTR",
+        "CPC",
+        "CVR",
+        "ROAS",
+    ]].copy()
+
+    curr_table = curr_table.rename(columns={
+        "총 주문수(1일)": "주문수",
+        "총 판매수량(1일)": "판매수량",
+        "총 전환매출액(1일)": "전환매출액",
+    })
+
+    # Top 컬러 선정 순서 유지
+    order_map = {color: idx for idx, color in enumerate(list(top_colors))}
+    curr_table["_정렬"] = curr_table["컬러"].apply(
+        lambda x: next(
+            (
+                order_map[color]
+                for color in order_map
+                if str(x).startswith(str(color))
+            ),
+            999
+        )
+    )
+
+    return (
+        curr_table
+        .sort_values("_정렬")
+        .drop(columns="_정렬")
+        .reset_index(drop=True)
+    )
+
+
+def style_curr_color_performance_table(df):
+    """전주 컬러별 성과표 스타일."""
+    if df.empty:
+        return df
+
+    format_map = {
+        "노출수": "{:,.0f}",
+        "클릭수": "{:,.0f}",
+        "광고비": "{:,.0f}",
+        "주문수": "{:,.0f}",
+        "판매수량": "{:,.0f}",
+        "전환매출액": "{:,.0f}",
+        "CTR": "{:,.2f}%",
+        "CPC": "{:,.0f}",
+        "CVR": "{:,.2f}%",
+        "ROAS": "{:,.2f}%",
+    }
+
+    return (
+        df.style
+        .format(format_map)
+        .set_properties(**{
+            "text-align": "center",
+            "border": "1px solid #d0d0d0",
+            "font-size": "13px",
+        })
+        .set_properties(subset=["컬러"], **{
+            "text-align": "left",
+            "font-weight": "700",
+        })
+        .set_table_styles([
+            {"selector": "th", "props": [
+                ("background-color", "#4472C4"),
+                ("color", "white"),
+                ("font-weight", "700"),
+                ("border", "1px solid #555"),
+                ("text-align", "center"),
+                ("white-space", "nowrap"),
+            ]},
+            {"selector": "td", "props": [
+                ("white-space", "nowrap"),
+            ]},
+        ])
+    )
+
 def make_download(df, filename):
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
@@ -960,6 +1061,29 @@ def render_campaign_dashboard(campaign_display_name, campaign_df):
         title=f"{clean_tab_name(campaign_display_name)} 전주 기준 컬러 Top {top_n_color} {METRIC_LABELS.get(color_metric, color_metric)} 전전주 vs 전주 비교"
     )
     st.plotly_chart(fig_color, use_container_width=True)
+
+    # 막대그래프 바로 아래: 전주 Top 컬러별 주요 성과지표
+    st.markdown("##### 전주 컬러별 성과지표")
+    st.caption(f"전주 기준 Top {top_n_color} 컬러의 주요 성과를 요약합니다.")
+
+    curr_color_performance_table = make_curr_color_performance_table(
+        color_summary,
+        top_colors,
+        color_rep_products
+    )
+
+    if curr_color_performance_table.empty:
+        st.warning("전주 컬러별 성과지표가 없습니다.")
+    else:
+        st.dataframe(
+            style_curr_color_performance_table(curr_color_performance_table),
+            use_container_width=True,
+            hide_index=True
+        )
+        make_download(
+            curr_color_performance_table,
+            f"{clean_tab_name(campaign_display_name)}_전주_컬러Top성과지표.xlsx"
+        )
 
     # 참고용: 전전주 기준 컬러 Top N 비교는 접어서 확인
     prev_color_summary = color_summary[color_summary["주차"] == "전전주"].copy()
