@@ -1084,6 +1084,21 @@ def render_campaign_dashboard(campaign_display_name, campaign_df):
             curr_color_performance_table,
             f"{clean_tab_name(campaign_display_name)}_전주_컬러Top성과지표.xlsx"
         )
+        
+    st.divider()
+    st.markdown("#### 📦 캠페인 전체 상품 재고 리스트")
+    st.caption("전주 raw 기준으로 해당 캠페인에 포함된 전체 color/사이즈 조합의 재고를 표시합니다.")
+    
+    campaign_all_stock = make_stock_summary_table(campaign_prev, campaign_curr)
+    
+    if campaign_all_stock.empty:
+        st.warning("캠페인 전체 상품 재고 데이터가 없습니다.")
+    else:
+        st.dataframe(campaign_all_stock, use_container_width=True, hide_index=True)
+        make_download(
+            campaign_all_stock,
+            f"{clean_tab_name(campaign_display_name)}_전체상품_재고리스트.xlsx"
+        )
 
     # 참고용: 전전주 기준 컬러 Top N 비교는 접어서 확인
     prev_color_summary = color_summary[color_summary["주차"] == "전전주"].copy()
@@ -1215,15 +1230,7 @@ def render_campaign_dashboard(campaign_display_name, campaign_df):
         color_stock_all = pd.concat(color_stock_tables, ignore_index=True)
         make_download(color_stock_all, f"{clean_tab_name(campaign_display_name)}_컬러Top_사이즈별_재고현황.xlsx")
 
-    st.divider()
-    st.markdown("#### 📦 캠페인 전체 상품 재고 리스트")
-    st.caption("전주 raw 기준으로 해당 캠페인에 포함된 전체 color/사이즈 조합의 재고를 표시합니다.")
-    campaign_all_stock = make_stock_summary_table(campaign_prev, campaign_curr)
-    if campaign_all_stock.empty:
-        st.warning("캠페인 전체 상품 재고 데이터가 없습니다.")
-    else:
-        st.dataframe(campaign_all_stock, use_container_width=True, hide_index=True)
-        make_download(campaign_all_stock, f"{clean_tab_name(campaign_display_name)}_전체상품_재고리스트.xlsx")
+    
 
 
 # =========================
